@@ -1,4 +1,4 @@
-function mainStitching( Nrow, Ncol ,MaxOverlap, f_Order)
+function fin_loc=mainStitching( Nrow, Ncol ,Overlap, uncertainty, f_Order, denoise_option)
 
 global location;
 fprintf('Stitch image r%dc%d\n',Nrow,Ncol);
@@ -10,11 +10,16 @@ if (f_num ==0)
     error('ERROR : The order of field images is needed');
 end
 
+if f_num < 10
+    max_fnum=2;
+elseif f_num >= 100
+    max_fnum=3;
+end
 image=cell(f_num,1);
 row_size = size(f_Order, 1);
 col_size =size(f_Order,2);
 for i=1:f_num
-    image{i}=loadImage( Nrow, Ncol,f_Order(floor((i-1)/col_size)+1,i-floor((i-1)/col_size)*col_size));
+    image{i}=loadImage(Nrow, Ncol,f_Order(floor((i-1)/col_size)+1,i-floor((i-1)/col_size)*col_size),max_fnum, denoise_option);
 end
 
 %field image's height and width
@@ -23,60 +28,38 @@ width =size(image{1},2);
 
 %Location : [ x, y, correlation, connected Field#]
 %FIn_loc : final location [x,y] of field images
-paths_f = zeros((row_size-1)*col_size + row_size*(col_size-1),5);
+paths_f = zeros(f_num*2,5);
 location=zeros(f_num,4);
 fin_loc=zeros(f_num,2);
 
 %Find Overlapping area between center field and it's neighboring fields
 %%In horizontal direction
-center_f=ceil(col_size/2)+(ceil(row_size/2)-1)*col_size;
-temp_num=1;
+
 for field= 1: f_num
     Current_row = floor((field-1)/col_size)+1;
     Current_col = field-floor((field-1)/col_size)*col_size;
     if (Current_col + 1 <= size(f_Order, 2))
-        [result_x, result_y, Corr]=left2right( image{field},  image{field+1},MaxOverlap);
-        paths_f(temp_num,:)=[field, field+1, result_x, result_y, Corr];
-        temp_num=temp_num+1;
+        fprintf('field : %d field+1:%d\n',field,field+1);
+        [result_x, result_y, Corr]=left2right(image{field}, image{field+1},uncertainty, Overlap,max_fnum);
+        paths_f(2*field-1,:)=[field, field+1, result_x, result_y, Corr];
     end
     
     if (Current_row + 1 <= size(f_Order,1))
-        [result_x, result_y, Corr]=up2down(image{field},image{field+3},MaxOverlap);
-         paths_f(temp_num,:)=[field, field+col_size, result_x, result_y, Corr];
-         temp_num=temp_num+1;
+        [result_x, result_y, Corr]=up2down(image{field},image{field+3},uncertainty,Overlap,max_fnum);
+         paths_f(2*field,:)=[field, field+col_size, result_x, result_y, Corr];
     end
     
 end
-
-[location,list_path] = optimizedPath(center_f, location, paths_f, f_Order,[0]); 
-
-
-
-%Find optimal connection of the field images that are diagonal location from center field. 
-%Opitmized alignment is done during this process
-% location=decideField(7,8,4,image,location,center_f,MaxOverlap);
-% location=decideField(9,8,6,image,location,center_f,MaxOverlap);
-% location=decideField(1,2,4,image,location,center_f,MaxOverlap);
-% location=decideField(3,2,6,image,location,center_f,MaxOverlap);
-
-%if boundary fields are connected in loop and center field is isoloated
-if ~any(location(:,4)==center_f)
-    [result_x, result_y, Corr]=left2right(image{center_f-1}, image{center_f},MaxOverlap);
-    location(center_f-1,:)=[result_x, result_y, Corr,center_f];
-end
+paths_f(paths_f(1,:)==0,:)=[];
+[location] = optimized_Path(location, paths_f, f_Order);
 
 %calculate Global location of each fields
 for n=1:f_num
     for num=1:f_num
         pre_num=location(num,4);
         if pre_num >0
-            if num > pre_num
-                fin_loc(num,1)=fin_loc(pre_num,1)+location(num,1);
-                fin_loc(num,2)=fin_loc(pre_num,2)+location(num,2);
-            else
-                fin_loc(num,1)=fin_loc(pre_num,1)-location(num,1);
-                fin_loc(num,2)=fin_loc(pre_num,2)-location(num,2);
-            end
+            fin_loc(num,1)=fin_loc(pre_num,1)+location(num,1);
+            fin_loc(num,2)=fin_loc(pre_num,2)+location(num,2);
         end
     end
     
@@ -114,14 +97,10 @@ end
 
 for i=1:f_num
     field=f_Order(floor((i-1)/col_size)+1,i-floor((i-1)/col_size)*col_size);
-    if Nrow < 10 && Ncol < 10
-        image=imread(['../input/',strcat('r0',int2str(Nrow),'c0',int2str(Ncol),'f0',int2str(field),'.tiff')]);
-    elseif Nrow < 10 && 9 < Ncol
-        image=imread(['../input/',strcat('r0',int2str(Nrow),'c',int2str(Ncol),'f0',int2str(field),'.tiff')]);
-    elseif Nrow > 9 && Ncol < 10
-        image=imread(['../input/',strcat('r',int2str(Nrow),'c0',int2str(Ncol),'f0',int2str(field),'.tiff')]);
-    else
-        image=imread(['../input/',strcat('r',int2str(Nrow),'c',int2str(Ncol),'f0',int2str(field),'.tiff')]);
+    if max_fnum==2
+        image=imread(['../input/',strcat('r',sprintf('%02d',Nrow),'c',sprintf('%02d',Ncol),'f',sprintf('%02d',field),'.tiff')]);
+    elseif max_fnum==3
+        image=imread(['../input/',strcat('r',sprintf('%02d',Nrow),'c',sprintf('%02d',Ncol),'f',sprintf('%03d',field),'.tiff')]);
     end
     first_y=fin_loc(i,2);first_x=fin_loc(i,1);
     fprintf('Numb %d : First_x %d First_y %d\n',i, first_x,first_y);
@@ -129,9 +108,7 @@ for i=1:f_num
 end
 
 imwrite(total_image,['../result/',title]);
-
 clear image; clear total_image;
-clear location;
 
 
 
